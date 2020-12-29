@@ -1,0 +1,322 @@
+﻿using System;
+using System.ServiceProcess;
+using System.Timers;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Threading;
+using Empresa.integracao.chat.filesystem;
+using System.Configuration;
+using ExtensionMethods;
+using System.Text.RegularExpressions;
+using Empresa.integracao.chat.log;
+using Empresa.integracao.chat.conection;
+using Empresa.integracao.chat.jsonParse;
+using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
+
+
+namespace Empresa.integracao.chat
+{
+    public partial class Service1 : ServiceBase
+    {
+        static readonly Func<string, string> readFile = new Func<string, string>(textFilePath => ReadJSON.ReadFile(textFilePath));
+
+        static readonly Func<string, Func<string, MatchCollection>> myRegex = new Func<string, string, MatchCollection>((reg, tex) => (new Regex(reg)).Matches(tex)).Curry();
+
+        static readonly Func<int, Func<MatchCollection, bool>> matchesNumberIsGratherThan = new Func<int, Func<MatchCollection, bool>>(other => matches => matches.Count > other);
+
+        static readonly Func<string, Func<string, bool>> myRegexNew = new Func<string, string, bool>((reg , tex) => (new Regex(reg)).Match(tex).Success).Curry();
+
+        static readonly Func<string, Func<string, Match>> myRegexNewThing = new Func<string, string, Match>((reg, tex) => (new Regex(reg)).Match(tex)).Curry();
+
+        static readonly Func<string, Func<Func<string, Match>, Func<string, string>>> genMatcherGroupStringOF = new Func<string, Func<string, Match>, string, string>((groupo, myGroupGx, texto) =>
+                myGroupGx(texto).Groups[groupo].Value).Curry();
+
+        static readonly Func<bool, bool> Not = new Func<bool, bool>(some => !some);
+
+        static readonly string FINAL_FILES_MOVE = "FINALIZADOS";
+        public Service1()
+        {
+
+            CentralLog.LogInfo("Start Service");
+
+            InitializeComponent();
+        }
+
+
+        public static string Machine(string path)
+        {
+
+            var extract = new Func<string, string, string>((source, destiny) => ReadJSON.extracZip(source, destiny));
+
+            var applySameInputChangeOtherWith = new Func<Func<string, string>, Func<string, string, string>, string, string>((change, functionToApply, inputOf) =>
+                                                functionToApply(inputOf, change(inputOf))).Curry();
+
+
+            var applySameInputChangeTheFirstWith = new Func<Func<string, string>, Func<string, string, string>, string, string>((change, functionToApply, inputOf) =>
+                                                functionToApply(change(inputOf), inputOf)).Curry();
+
+
+
+            var getOnlyPathOfFileTo = applySameInputChangeOtherWith(ReadJSON.pathName);
+
+            var extractFilesWhereIs = getOnlyPathOfFileTo(extract);
+
+
+            var moveFilesOf = new Func<string, string, string>((source, pathTo) => ReadJSON.moveFile(source, pathTo));
+
+            var concatStrings = new Func<string, string, string>((stringToConat, stringSource) => stringSource + stringToConat).Curry();
+
+            var AddDirectoryToFinsh = concatStrings(Path.DirectorySeparatorChar + Service1.FINAL_FILES_MOVE);
+
+            var getDirectoryNameParent = new Func<string, string>(pathOfFile => ReadJSON.getParent(pathOfFile));
+
+            var getFileName = new Func<string, string>(pathOfFile => ReadJSON.fileNameInPath(pathOfFile));
+
+
+
+            var ConcatOnlyDirectoryToFinsh = AddDirectoryToFinsh.Compose(getDirectoryNameParent);
+
+            var concatyStrings = new Func<string, string, string>((some, sometoo) => some + sometoo).Curry();
+
+            var concatyFilenameToNewDirectoryInFinalizados = new Func<string, string>(somePathFile => /// TODO: not pure function wiet
+                   ConcatOnlyDirectoryToFinsh(somePathFile) + Path.DirectorySeparatorChar + getFileName(somePathFile));
+
+
+            var getOnlyThePathForFinalizadosWithNameAnd = applySameInputChangeOtherWith(concatyFilenameToNewDirectoryInFinalizados);
+
+            var extractFilesToFinalizado = getOnlyThePathForFinalizadosWithNameAnd(moveFilesOf);
+
+            var extractAndMoveFilesToFinalizados = extractFilesToFinalizado.Compose(extractFilesWhereIs);
+
+            
+            try
+            {
+
+                //// List of Finalizados
+
+                string groupoNaoProcessadoTestar = "FILEPARAPROCESSAR";
+                string groupoFinlizado = "FILEFINALIZADO";
+
+                string myregexForZipFilesInFinalizados = ConfigurationManager.AppSettings["regexForGetFinalizedFiles"];
+                string myregexForZipFilesFinalizados = ConfigurationManager.AppSettings["regexForPathIsInFinalizados"];
+                string myregexForExtracFileOfNaoProcessado = ConfigurationManager.AppSettings["regexForExtracFileZipInNaoProcessados"];
+
+                var pathCheckerZipFinalizados = myRegexNewThing(myregexForZipFilesInFinalizados);
+
+                var getGroupoOfFinalizadosInRegex = genMatcherGroupStringOF(groupoFinlizado);
+
+                var pathToFileFinalizado = getGroupoOfFinalizadosInRegex(pathCheckerZipFinalizados);
+
+
+                var pathExtractNaoProcessadoFileZip = myRegexNewThing(myregexForExtracFileOfNaoProcessado);
+
+                var getGroupoNaoProcesadosTestar = genMatcherGroupStringOF(groupoNaoProcessadoTestar);
+
+                var extraiFileNameNaoProcessados = getGroupoOfFinalizadosInRegex(pathExtractNaoProcessadoFileZip);
+
+
+
+                var concatStringWithVirgulaIfNotNull= new Func<string, string>(stringFinalizados => stringFinalizados.Length > 0 ? stringFinalizados + "," : "");
+
+                var funcToGenPathStringForArray = concatStringWithVirgulaIfNotNull.Compose(pathToFileFinalizado);
+
+                var checkIfPAthIsFinalizado = myRegexNew(myregexForZipFilesFinalizados);
+
+
+                OpAmp myCheckPath = new OpAmp(checkIfPAthIsFinalizado);
+                OpBack myComposeFinalResult = new OpBack(funcToGenPathStringForArray);
+
+                CentralLog.LogInfo("Gerando Lista de Ja Finalizados");
+
+                string ListOfFinalizadosWithVirgula = ReadJSON.recursiveCallByDelegate(path, myCheckPath, myComposeFinalResult);
+
+                // Debug
+                CentralLog.LogInfo(ListOfFinalizadosWithVirgula);
+
+                ListOfFinalizadosWithVirgula = ListOfFinalizadosWithVirgula.Substring(0, ListOfFinalizadosWithVirgula.Length > 1 ? 
+                            ListOfFinalizadosWithVirgula.Length - 2: ListOfFinalizadosWithVirgula.Length);
+
+                List<string> Finalizados = new List<string>(ListOfFinalizadosWithVirgula.Split(','));
+
+                CentralLog.LogInfo(Finalizados.Count.ToString());
+
+                var testStringIsNotInArrayOfStringWithFunction = new Func<List<string>, string, bool>((arrayOF, pathNow) =>
+                   arrayOF.Aggregate(true, (acc, now) => {
+
+                       CentralLog.LogInfo(pathNow);
+                       CentralLog.LogInfo(acc.ToString());
+                       CentralLog.LogInfo(Not(pathNow.Contains(now)).ToString());
+                       CentralLog.LogInfo(now);
+                       return acc && Not(pathNow.Contains(now));
+                       })).Curry();
+                
+
+                var testaPathDeFileNaoExisteNaListaDeFinalizados = testStringIsNotInArrayOfStringWithFunction (Finalizados);
+
+                var verificaseZipJaFoiFinalizado = new Func<Func<string, bool>, Func<string, string>,string, string>((test, run, stringOf) =>
+                    test(stringOf) ? run(stringOf) : "").Curry();
+
+                var verificasePathEhFinalizadoEntao = verificaseZipJaFoiFinalizado(testaPathDeFileNaoExisteNaListaDeFinalizados);
+
+                var testaPahSeFoiFinalizadoSenaoExtraieMoveArquivosPAraFinalizado = verificasePathEhFinalizadoEntao(extractAndMoveFilesToFinalizados);
+
+
+                //// Find and Extract all zip Fiels
+
+                string myregexForZipFilestoExtract = ConfigurationManager.AppSettings["regexForZipFilestoExtract"];
+
+                var pathCheckerZip = myRegexNew(myregexForZipFilestoExtract);
+
+                var finalComutation = testaPahSeFoiFinalizadoSenaoExtraieMoveArquivosPAraFinalizado;
+
+
+                myCheckPath = new OpAmp(pathCheckerZip);
+                myComposeFinalResult = new OpBack(finalComutation);
+
+                CentralLog.LogInfo("Movendo e Extraindo Arquivos");
+
+                string logSucess = ReadJSON.recursiveCallByDelegate(path, myCheckPath, myComposeFinalResult);
+
+                CentralLog.LogInfo("Extraidos:: " + logSucess);
+
+                //string json = ReadJSON.recursiveCallByDelegate(path, myCheckPath, myCheckFinalResult);
+
+                //// Find and Join all Json Files
+                string myregexForJsonFilesexp = ConfigurationManager.AppSettings["regexForJsonFilesexp"];
+
+                // string regexForJsonMarca = @"(([\d\w-]+)\\+NAO PROCESSADOS)"; /// TODO: for the converter.
+
+                var pathcheckisJsonFile = myRegexNew(myregexForJsonFilesexp);
+
+                var myHandlerJson = new Func<string, string>(somePath => "{'path': '" + somePath.Replace('\\', '/') + "', 'message': " + readFile(somePath) + "}, ");
+
+                CentralLog.LogInfo("Lendo JSON's");
+
+                myCheckPath = new OpAmp(pathcheckisJsonFile);
+                myComposeFinalResult = new OpBack(myHandlerJson);
+
+                string json = ReadJSON.recursiveCallByDelegate(path, myCheckPath, myComposeFinalResult);
+
+                // DEBUG
+                // CentralLog.LogInfo(json);
+
+                if (json != "")
+                    json = "[" + json.Substring(0, json.Length - 2) + "]";
+
+
+                //// Find and Remove All Processed Files
+                string myregexForRemoveFilesYetProcessed = ConfigurationManager.AppSettings["regexForRemoveFilesYetProcessed"];
+
+
+                var checkisTheDirectoryToDelete = myRegexNew(myregexForRemoveFilesYetProcessed);
+
+                var recursiveDeletionOrNo = new Func<bool, string, string>((recusiveDeletionDic, directory) =>
+                {
+                    ReadJSON.deleteDirectory(directory, recusiveDeletionDic);
+                    return directory + ",";
+                }).Curry();
+
+                var recusiveDeletion = recursiveDeletionOrNo(true);
+
+                myCheckPath = new OpAmp(checkisTheDirectoryToDelete);
+                myComposeFinalResult = new OpBack(recusiveDeletion);
+
+
+                CentralLog.LogInfo("Removendo Arquivos");
+
+                string deletion = ReadJSON.recursiveCallByDelegateForDeleting(path, myCheckPath, myComposeFinalResult);
+
+
+                CentralLog.LogInfo("Deletados:: " + deletion);
+
+                return json;
+               // }
+            }
+            catch (Exception e)
+            {
+                CentralLog.LogError(e, $@"::ERROR:: MACHINE HAVE SOME ERROR ::ERROR::");
+                return "";
+            }
+        }
+
+
+        public void OnDebug ()
+        {
+            OnStart(null);
+        }
+
+        public static void Burn (Object source, System.Timers.ElapsedEventArgs e)
+        {
+            BeginBurn();
+        }
+        public static void BeginBurn  ()
+        {
+            try
+            {
+                CentralLog.LogInfo("Begin Burn");
+
+                string path = ConfigurationManager.AppSettings["Path"];
+
+                int horas = Convert.ToInt16(ConfigurationManager.AppSettings["TempoEmHoras"]);
+                
+                CentralLog.LogInfo(path);
+
+                OracleConection ora = new OracleConection();
+
+                string json = Machine(path);
+
+                List<JObject> nnjson = JSONparser.parseSWAPJSON(json);
+
+                List<MensagemTableDim> myList = MensagemTableDim.convertToDim(nnjson);
+
+                ora.Connect();
+
+                CentralLog.LogInfo("Inserindo Dados");
+
+                CentralLog.LogInfo(myList.Count.ToString());
+                //// Debug Mode
+                myList.ForEach(r =>
+                  {
+                      CentralLog.LogInfo(MensagemTableDim.ConvertToString(r));
+                  });
+
+                // WARNING DANGERERS
+                //myList.ForEach(r =>
+                //{
+                //    ora.insere(r, r.SK_CHAT, ora);
+                //});
+
+                CentralLog.LogInfo("Finsh");
+                ora.Close();
+
+                CentralLog.LogInfo("Next Rerun in " + horas.ToString() + " horas");
+
+            }
+            catch (Exception err)
+            {
+                CentralLog.LogError(err, "Error in Execut Burn Execution");
+                throw err;
+            }
+        }
+        private static void RunService()
+        {
+            int horas = Convert.ToInt16(ConfigurationManager.AppSettings["TempoEmHoras"]);
+            var aTimer = new System.Timers.Timer( horas * 60 * 60 * 1000); //one hour in milliseconds
+            aTimer.Elapsed += new ElapsedEventHandler(Burn);
+            aTimer.Start();
+        }
+        protected override void OnStart(string[] args)
+        {
+            RunService();
+            BeginBurn();
+        }
+
+        protected override void OnStop()
+        {
+            CentralLog.LogInfo("Stop Service");
+
+        }
+    }
+}
